@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Skibus - Per Autisti</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .grad { background: linear-gradient(135deg, #22d3ee 0%, #60a5fa 50%, #34d399 100%); }
+    .glass { backdrop-filter: blur(8px); background: rgba(255,255,255,0.75); }
+    @media (prefers-color-scheme: dark){ .glass { background: rgba(17,24,39,0.6); color:#e5e7eb; } body{background:#0b1220;} }
+  </style>
+</head>
+<body class="min-h-screen grad">
+  <div class="max-w-7xl mx-auto p-4 sm:p-10">
+    <header class="glass rounded-2xl p-4 sm:p-6 shadow-xl border border-white/20 flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-3xl sm:text-4xl font-black tracking-tight">Skibus - Per Autisti</h1>
+        <p class="text-sm opacity-80">Heute Oggi e Morgen Domani da Google Sheets. Aggiornamento automatico ogni 60 secondi.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <select id="lang" class="px-3 py-2 rounded-xl border text-sm">
+          <option value="de">Deutsch</option>
+          <option value="it">Italiano</option>
+        </select>
+        <button id="refreshBtn" class="px-3 py-2 rounded-xl border text-sm">Aggiorna</button>
+      </div>
+    </header>
+
+    <main class="grid lg:grid-cols-2 gap-6 mt-6">
+      <section id="heute" class="glass rounded-2xl p-4 border border-white/20 shadow-xl"></section>
+      <section id="morgen" class="glass rounded-2xl p-4 border border-white/20 shadow-xl"></section>
+    </main>
+
+    <footer class="glass mt-8 rounded-2xl p-4 border border-white/20 text-xs flex items-center justify-between">
+      <span id="lastRefresh">-</span>
+      <span id="status" class="opacity-80">Online</span>
+    </footer>
+  </div>
+
+  <script>
+  const SHEET_ID = "REPLACE_WITH_YOUR_SHEET_ID";
+  const SHEETS = { HEUTE: "Heute / Oggi", MORGEN: "Morgen / Domani" };
+  const L = {
+    de:{ title_heute:"Heute / Oggi", title_morgen:"Morgen / Domani", andata:"Hinfahrt", ritorno:"Rückfahrt",
+        data:"Datum / Data", orario:"Uhrzeit / Orario", fermataA:"Ausstiegspunkt / Fermata", camera:"Zimmer / Camera",
+        personeA:"Pers. Hinfahrt / Persone Andata", fermataScelta:"Gewählter Ausstiegspunkt / Fermata scelta",
+        partenza:"Abfahrtsstelle / Punto di partenza", personeR:"Pers. Rückfahrt / Persone Ritorno",
+        partenzaScelta:"Gewählter Startpunkt / Punto scelto" },
+    it:{ title_heute:"Heute / Oggi", title_morgen:"Morgen / Domani", andata:"Andata", ritorno:"Ritorno",
+        data:"Data", orario:"Orario", fermataA:"Fermata Andata", camera:"N. Camera",
+        personeA:"Persone Andata", fermataScelta:"Fermata scelta",
+        partenza:"Punto di partenza", personeR:"Persone Ritorno",
+        partenzaScelta:"Punto di partenza scelto" }
+  };
+  const gviz = s => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(s)}`;
+  const parseGViz = t => JSON.parse(t.match(/google.visualization.Query.setResponse\\((.*)\\);/s)[1]);
+  async function fetchSheet(name){ const res=await fetch(gviz(name),{cache:"no-store"}); const txt=await res.text(); const j=parseGViz(txt); return j.table.rows.map(r=>r.c.map(c=>c?c.v:"")); }
+
+  function renderSection(container, title, rows, lang){
+    const t = L[lang];
+    const colCount = rows[0].length;
+    const cols = Array.from({length: Math.max(0,colCount-2)}, (_,i)=>i+2);
+
+    const block = (label, kvs) => `<div class="rounded-xl border p-3 bg-white/70">
+      <div class="font-semibold mb-2">${label}</div>
+      <div class="space-y-1 text-sm">${kvs.map(([k,v])=>`<div class="flex items-center justify-between gap-4"><span class="opacity-70">${k}</span><span class="font-medium">${v||""}</span></div>`).join("")}</div>
+    </div>`;
+
+    const andata = cols.map(ci=>{
+      const d=rows[2][ci], or=rows[3][ci], ferm=rows[4][ci], cam=rows[5][ci], p=rows[6][ci], scel=rows[7][ci];
+      if(!or && !ferm) return null;
+      return block(`${t.andata} - ${or||""}`, [[t.data,d],[t.fermataA,ferm],[t.camera,cam],[t.personeA,p],[t.fermataScelta,scel]]);
+    }).filter(Boolean).join("");
+
+    const ritorno = cols.map(ci=>{
+      const d=rows[9][ci], or=rows[10][ci], part=rows[11][ci], cam=rows[12][ci], p=rows[13][ci], scel=rows[14][ci];
+      if(!or && !part) return null;
+      return block(`${t.ritorno} - ${or||""}`, [[t.data,d],[t.partenza,part],[t.camera,cam],[t.personeR,p],[t.partenzaScelta,scel]]);
+    }).filter(Boolean).join("");
+
+    container.innerHTML = `<h2 class="text-xl font-bold mb-3">${title}</h2>
+      <div class="grid gap-3">${andata || '<div class="text-sm opacity-70">Nessun dato</div>'}${ritorno}</div>`;
+  }
+
+  async function refresh(){
+    const lang = document.getElementById("lang").value;
+    try{
+      const [H,M] = await Promise.all([fetchSheet(SHEETS.HEUTE), fetchSheet(SHEETS.MORGEN)]);
+      renderSection(document.getElementById("heute"), lang==="de"?L.de.title_heute:L.it.title_heute, H, lang);
+      renderSection(document.getElementById("morgen"), lang==="de"?L.de.title_morgen:L.it.title_morgen, M, lang);
+      document.getElementById("lastRefresh").textContent = "Ultimo aggiornamento: " + new Date().toLocaleString();
+      document.getElementById("status").textContent = navigator.onLine ? "Online" : "Offline";
+    }catch(e){ document.getElementById("status").textContent = "Errore"; console.error(e); }
+  }
+  document.getElementById("lang").addEventListener("change", refresh);
+  document.getElementById("refreshBtn").addEventListener("click", refresh);
+  refresh(); setInterval(refresh, 60000);
+  </script>
+</body>
+</html>

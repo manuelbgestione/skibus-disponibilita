@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Skibus - Verfügbarkeit / Disponibilità</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .grad { background: linear-gradient(135deg, #0ea5e9 0%, #22d3ee 50%, #a78bfa 100%); }
+    .glass { backdrop-filter: blur(8px); background: rgba(255,255,255,0.75); }
+    @media (prefers-color-scheme: dark){ .glass { background: rgba(17,24,39,0.6); color:#e5e7eb; } body{background:#0b1220;} }
+    .badge{padding:.25rem .5rem;border-radius:999px;font-size:.8rem}
+    .bar{height:8px;border-radius:999px;overflow:hidden;background:#e2e8f0}
+    .bar>div{height:100%;transition:width .4s ease}
+  </style>
+</head>
+<body class="min-h-screen grad">
+  <div class="max-w-6xl mx-auto p-4 sm:p-10">
+    <header class="glass rounded-2xl p-4 sm:p-6 shadow-xl border border-white/20 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+      <div>
+        <h1 class="text-3xl sm:text-4xl font-black tracking-tight">Skibus - Verfügbarkeit / Disponibilità</h1>
+        <p class="text-sm opacity-80">Dati in tempo quasi reale da Google Sheets. Aggiornamento automatico ogni 60 secondi.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <select id="lang" class="px-3 py-2 rounded-xl border text-sm">
+          <option value="de">Deutsch</option>
+          <option value="it">Italiano</option>
+        </select>
+        <button id="refreshBtn" class="px-3 py-2 rounded-xl border text-sm">Aggiorna</button>
+      </div>
+    </header>
+
+    <main id="cards" class="grid md:grid-cols-2 gap-6 mt-6"></main>
+
+    <footer class="glass mt-8 rounded-2xl p-4 border border-white/20 text-xs flex items-center justify-between">
+      <span id="lastRefresh">-</span>
+      <span id="status" class="opacity-80">Online</span>
+    </footer>
+  </div>
+
+  <script>
+  // Configurazione
+  const SHEET_ID = "REPLACE_WITH_YOUR_SHEET_ID";
+  const SHEETS = { ANDATA: "Andata", RITORNO: "Ritorno" };
+
+  const L = {
+    de:{ andata:"Hinfahrt", ritorno:"Rückfahrt", ok:"✅ Buchbar", full:"🔒 Ausgebucht",
+         orario:"Uhrzeit", occupati:"Belegt", disp:"Frei" },
+    it:{ andata:"Andata", ritorno:"Ritorno", ok:"✅ Prenotabile", full:"🔒 Posti Esauriti",
+         orario:"Orario", occupati:"Occupati", disp:"Disponibili" }
+  };
+
+  const gviz = s => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(s)}`;
+  const parseGViz = t => JSON.parse(t.match(/google.visualization.Query.setResponse\\((.*)\\);/s)[1]);
+  async function fetchSheet(name){
+    const res = await fetch(gviz(name), {cache:"no-store"});
+    const txt = await res.text();
+    const json = parseGViz(txt);
+    const rows = json.table.rows.map(r=>r.c.map(c=>c?c.v:""));
+    return rows;
+  }
+
+  function capacityBar(occ, max){
+    const pct = Math.max(0, Math.min(100, Math.round((occ/max)*100)));
+    return `<div class="bar"><div style="width:${pct}%;" class="${pct>=100?'bg-red-500':'bg-emerald-500'}"></div></div>`;
+  }
+
+  function render(container, title, rows, lang){
+    const t = L[lang];
+    const items = rows.slice(1).map(r=>{
+      const orario = r[0]||"";
+      const occ = Number(r[2]||0);
+      const disp = Number(r[3]||0);
+      const full = String(r[4]||"").includes("🔒");
+      const badge = full ? `<span class="badge bg-red-100 text-red-700">${t.full}</span>`
+                         : `<span class="badge bg-green-100 text-green-700">${t.ok}</span>`;
+      return `<div class="glass rounded-2xl p-4 border border-white/20 shadow-xl">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-lg font-semibold">${orario}</div>
+          <div>${badge}</div>
+        </div>
+        <div class="grid grid-cols-3 gap-3 text-sm">
+          <div><div class="opacity-80">${t.orario}</div><div class="font-medium">${orario}</div></div>
+          <div><div class="opacity-80">${t.occupati}</div><div class="font-bold">${occ}</div></div>
+          <div><div class="opacity-80">${t.disp}</div><div class="font-bold">${disp}</div></div>
+        </div>
+        <div class="mt-3">${capacityBar(occ, occ+disp || 8)}</div>
+      </div>`;
+    }).join("");
+    container.innerHTML = `<div class="glass rounded-2xl p-4 border border-white/20 shadow-xl">
+      <h2 class="text-xl font-bold mb-3">${title}</h2>
+      <div class="grid gap-3">${items || '<div class="text-sm opacity-80">Nessun dato</div>'}</div>
+    </div>`;
+  }
+
+  async function refresh(){
+    const lang = document.getElementById("lang").value;
+    const wrap = document.getElementById("cards");
+    wrap.innerHTML = `<div class="glass h-64 animate-pulse rounded-2xl border border-white/20"></div>
+                      <div class="glass h-64 animate-pulse rounded-2xl border border-white/20"></div>`;
+    try{
+      const [A,R] = await Promise.all([fetchSheet(SHEETS.ANDATA), fetchSheet(SHEETS.RITORNO)]);
+      wrap.innerHTML = "";
+      const a = document.createElement("section");
+      const r = document.createElement("section");
+      wrap.appendChild(a); wrap.appendChild(r);
+      render(a, lang==="de"?L.de.andata:L.it.andata, A, lang);
+      render(r, lang==="de"?L.de.ritorno:L.it.ritorno, R, lang);
+      document.getElementById("lastRefresh").textContent = "Ultimo aggiornamento: " + new Date().toLocaleString();
+      document.getElementById("status").textContent = navigator.onLine ? "Online" : "Offline";
+    }catch(err){
+      document.getElementById("status").textContent = "Errore caricamento";
+      console.error(err);
+    }
+  }
+  document.getElementById("lang").addEventListener("change", refresh);
+  document.getElementById("refreshBtn").addEventListener("click", refresh);
+  refresh(); setInterval(refresh, 60000);
+  </script>
+</body>
+</html>
