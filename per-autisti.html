@@ -11,10 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
   <style>
-    :root{
-      --bg1:#e6f1ff; --bg2:#e9f8f2; --card:#ffffff; --ink:#0f172a; --sub:#475569; --ok:#16a34a; --chip:#eaf7ef; --line:#e6eaf0;
-      --radius:18px; --shadow: 0 8px 24px rgba(0,0,0,.08);
-    }
+    :root{--bg1:#e6f1ff;--bg2:#e9f8f2;--card:#fff;--ink:#0f172a;--sub:#475569;--ok:#16a34a;--chip:#eaf7ef;--line:#e6eaf0;--radius:18px;--shadow:0 8px 24px rgba(0,0,0,.08)}
     html,body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(135deg,var(--bg1),var(--bg2)) fixed;color:var(--ink)}
     .wrap{max-width:1100px;margin:32px auto;padding:0 16px}
     .head{display:flex;align-items:center;gap:16px;justify-content:space-between;margin-bottom:20px}
@@ -37,7 +34,7 @@
     .cell:last-child{border-top-right-radius:10px;border-bottom-right-radius:10px;text-align:right;font-weight:800}
     .empty{padding:14px;border:1px dashed var(--line);border-radius:12px;background:#fafafa;color:var(--sub);text-align:center;margin-top:12px}
     .btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:8px 10px;font-weight:600;cursor:pointer}
-    .err{font-size:12px;color:#b91c1c;margin-top:6px}
+    .err{font-size:12px;color:#b91c1c;margin-top:6px;white-space:pre-wrap}
   </style>
 </head>
 <body>
@@ -70,47 +67,130 @@
   </div>
 
 <script>
-/* ===================== CONFIG ===================== */
+/* ====== CONFIG ====== */
 const SHEET_ID = "1swHUZ3IyV9dw1Y9EqzuChMGOP7lOwOrIIPX190wOnAc";
 const CANDIDATE_SHEETS = [
   "Heute / Oggi","Morgen / Domani","Riepilogo Fermate Autisti","Skibus Prenotazioni","Andata","Ritorno"
 ];
 const REFRESH_MS = 60000;
 
-/* ===================== DOM ===================== */
+/* ====== DOM ====== */
 const stampEl = document.getElementById("stamp");
 const footerEl = document.getElementById("footerNote");
 const andataEl = document.getElementById("andata");
 const ritornoEl = document.getElementById("ritorno");
 document.getElementById("refreshBtn").addEventListener("click", loadAll);
 
-/* ===================== UTILS ===================== */
-function nowStamp(){ return new Date().toLocaleString(undefined,{hour12:false}); }
-function setStamp(){ stampEl.textContent = "Aggiornato • Aktualisiert: " + nowStamp(); }
-function gvizUrl(sheet){ return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}&t=${Date.now()}`; }
-function norm(v){ return (v==null?"":String(v)).trim(); }
-function isTimeLike(s){ return /^\d{1,2}:\d{2}$/.test(s||""); }
+/* ====== UTILS ====== */
+const norm = v => (v==null?"":String(v)).trim();
+const low  = s => norm(s).toLowerCase();
+const isTime = s => /^\d{1,2}:\d{2}$/.test(s||"");
+const sum   = arr => arr.reduce((a,b)=>a+(Number(String(b).replace(",", "."))||0),0);
+function setStamp(){ stampEl.textContent = "Aggiornato • Aktualisiert: " + new Date().toLocaleString(undefined,{hour12:false}); }
+function url(sheet){ return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}&t=${Date.now()}`; }
 
-/* ——— Matching “lessicale” indipendente dall’ordine lingua ———
-   time:     include "uhrzeit" oppure "orario"
-   people:   include "personen" oppure "persone"
-   stopOut:  include "ausstieg" (o "ausstiegspunkt") oppure "fermata"
-   stopBack: include "startpunkt" oppure "punto di partenza"
-*/
-function matchIndex(headers, keywords){
-  const hk = headers.map(h => norm(h).toLowerCase());
-  return hk.findIndex(h => keywords.some(k => h.includes(k)));
+/* parole chiave per trovare le intestazioni, multilingua e flessibili */
+const KW = {
+  time: ["uhrzeit","orario"],
+  stopOut: ["ausstieg","ausstiegspunkt","fermata"],
+  stopBack:["startpunkt","punto di partenza"],
+  peopleGeneric: ["personen","persone","anzahl","totale","gesamt"],
+  outHints: ["hinfahrt","andata","hin","ausstieg"],
+  backHints:["rückfahrt","ritorno","zurück","zurueck","startpunkt"]
+};
+/* colonne “numeriche” alternative per calcolare le persone */
+const KW_NUM = {
+  out:  ["posti andata","plätze hinfahrt","plaetze hinfahrt","hin","andata"],
+  back: ["posti ritorno","plätze rückfahrt","plaetze rueckfahrt","rück","ritorno"]
+};
+const KW_EXTRA_NUM = ["adulti","kinder","bambini","erwachsene","gesamt","totale","total","persons","people","anzahl","count"];
+
+/* ====== CORE ====== */
+async function fetchRows(sheetName){
+  const res = await fetch(url(sheetName), {cache:"no-store"});
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const txt = await res.text();
+  const json = JSON.parse(txt.substring(txt.indexOf("{"), txt.lastIndexOf("}")+1));
+  const t = json.table;
+  if(!t || !t.rows) throw new Error("Formato GViz inatteso");
+  const rows = t.rows.map(r => (r.c||[]).map(c => norm(c && (c.f ?? c.v))));
+  const labels = (t.cols||[]).map(c => norm(c && c.label));
+  return {rows, labels};
 }
 
-function findHeaderRow(rows, keywordsUnion, maxScan=24){
-  const kw = keywordsUnion.map(x=>x.toLowerCase());
+function findHeaderRow(rows, keywords, maxScan=30){
   const lim = Math.min(rows.length, maxScan);
-  for(let r=0;r<lim;r++){
-    const line = rows[r].map(x=>norm(x).toLowerCase());
-    const hits = line.filter(cell => kw.some(k => cell.includes(k))).length;
+  for(let r=0; r<lim; r++){
+    const line = rows[r].map(x => low(x));
+    const hits = line.filter(cell => keywords.some(k => cell.includes(k))).length;
     if(hits >= 2) return r;
   }
   return -1;
+}
+
+function findIndex(headers, keys){
+  const H = headers.map(h => low(h));
+  return H.findIndex(h => keys.some(k => h.includes(k)));
+}
+
+function numericColsForMode(headers, mode){
+  const H = headers.map(h => low(h));
+  const primKeys = (mode==="out"?KW_NUM.out:KW_NUM.back).map(k=>low(k));
+  const extraKeys= KW_EXTRA_NUM.map(k=>low(k));
+
+  const primary = [];
+  H.forEach((h,i)=>{ if(primKeys.some(k=>h.includes(k))) primary.push(i); });
+
+  const extra = [];
+  H.forEach((h,i)=>{ if(extraKeys.some(k=>h.includes(k))) extra.push(i); });
+
+  return {primary, extra};
+}
+
+function getPeopleFromRow(row, primaryIdxs, extraIdxs){
+  const p1 = sum(primaryIdxs.map(i => row[i]));
+  if(p1>0) return p1;
+  const p2 = sum(extraIdxs.map(i => row[i]));
+  return p2;
+}
+
+function extractSection(rows, headerRow, mode){ // mode: "out"|"back"
+  if(headerRow<0) return {items:[], error:"Header non trovato."};
+  const header = rows[headerRow];
+
+  const timeIdx = findIndex(header, KW.time);
+  const stopIdx = findIndex(header, mode==="out"?KW.stopOut:KW.stopBack);
+
+  const {primary, extra} = numericColsForMode(header, mode);
+  let peopleIdx = findIndex(header, KW.peopleGeneric);
+
+  if(timeIdx<0 || stopIdx<0){
+    return {items:[], error:`Manca colonna tempo/fermata (${mode}).`};
+  }
+
+  const items = [];
+  for(let r=headerRow+1; r<rows.length; r++){
+    const row = rows[r];
+    const allEmpty = row.every(x => !norm(x));
+    const looksLikeHeader = row.some(x=>{
+      const s = low(x);
+      return ["uhrzeit","orario","personen","persone","ausstieg","startpunkt","fermata","punto di partenza","hinfahrt","rückfahrt","andata","ritorno"].some(k=>s.includes(k));
+    });
+    if(allEmpty || looksLikeHeader) break;
+
+    const time = norm(row[timeIdx]);
+    const stop = norm(row[stopIdx]);
+
+    let people = 0;
+    if(peopleIdx>=0) people = Number(String(row[peopleIdx]).replace(",", ".")) || 0;
+    if(people<=0){
+      people = getPeopleFromRow(row, primary, extra);
+    }
+
+    if(!isTime(time) || !stop || people<=0) continue;
+    items.push({time, stop, people});
+  }
+  return {items};
 }
 
 function groupByTime(items){
@@ -132,14 +212,14 @@ function groupByTime(items){
   return {times, byTime};
 }
 
-function render(container, groups, errMsg){
+function render(container, groups, emptyMsg){
   container.innerHTML = "";
-  if(errMsg){
-    container.innerHTML = `<div class="empty">Impossibile leggere i dati.</div><div class="err">${errMsg}</div>`;
+  if(emptyMsg){
+    container.innerHTML = `<div class="empty">${emptyMsg}</div>`;
     return;
   }
   if(groups.times.length===0){
-    container.innerHTML = `<div class="empty">Nessun dato disponibile / Keine Daten verfügbar.</div>`;
+    container.innerHTML = `<div class="empty">Nessuna prenotazione al momento / Keine Buchungen.</div>`;
     return;
   }
   for(const t of groups.times){
@@ -167,89 +247,12 @@ function render(container, groups, errMsg){
   }
 }
 
-/* ===================== CORE ===================== */
-async function fetchTable(sheetName){
-  const res = await fetch(gvizUrl(sheetName),{cache:"no-store"});
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  const txt = await res.text();
-  const json = JSON.parse(txt.substring(txt.indexOf("{"), txt.lastIndexOf("}")+1));
-  const t = json.table;
-  if(!t || !t.rows) throw new Error("Formato GViz inatteso");
-  const rows = t.rows.map(r => (r.c||[]).map(c => norm(c && (c.f ?? c.v))));
-  const labels = (t.cols||[]).map(c => norm(c && c.label));
-  return {rows, labels};
-}
-
-function extractSection(rows, headerRow, role){ // role: "out" | "back"
-  const header = rows[headerRow];
-  const timeIdx   = matchIndex(header, ["uhrzeit","orario"]);
-  const peopleIdx = matchIndex(header, ["personen","persone"]);
-  const stopIdx   = role==="out"
-    ? matchIndex(header, ["ausstieg","ausstiegspunkt","fermata"])
-    : matchIndex(header, ["startpunkt","punto di partenza"]);
-
-  if(timeIdx<0 || peopleIdx<0 || stopIdx<0){
-    const missing = [
-      timeIdx<0?"[Uhrzeit/Orario]":"",
-      peopleIdx<0?"[Personen/Persone]":"",
-      stopIdx<0?(role==="out"?"[Ausstieg/Fermata]":"[Startpunkt/Punto di partenza]"):""
-    ].filter(Boolean).join(" ");
-    return {error:`Intestazioni mancanti ${missing}.`, items:[]};
-  }
-
-  const items = [];
-  for(let r=headerRow+1; r<rows.length; r++){
-    const row = rows[r];
-    const allEmpty = row.every(x=>!norm(x));
-    // interrompi alla riga vuota o a un’altra intestazione plausibile
-    const looksLikeNewHeader = row.some(x=>{
-      const s = norm(x).toLowerCase();
-      return ["uhrzeit","orario","personen","persone","ausstieg","startpunkt","fermata","punto di partenza"].some(k=>s.includes(k));
-    });
-    if(allEmpty || looksLikeNewHeader) break;
-
-    const time = norm(row[timeIdx]);
-    const stop = norm(row[stopIdx]);
-    const ppl  = Number(norm(row[peopleIdx]).replace(",",".")) || 0;
-    if(!isTimeLike(time) || !stop || ppl<=0) continue;
-    items.push({time, stop, people:ppl});
-  }
-  return {items};
-}
-
 async function loadAll(){
   footerEl.textContent = "Aggiornamento in corso… / Wird aktualisiert…";
+
   for(const sheetName of CANDIDATE_SHEETS){
     try{
-      const {rows, labels} = await fetchTable(sheetName);
+      const {rows} = await fetchRows(sheetName);
 
-      // trova header Andata e header Ritorno (scansione prime 24 righe)
-      const outHdr = findHeaderRow(rows, ["uhrzeit","orario","personen","persone","ausstieg","ausstiegspunkt","fermata"]);
-      const backHdr= findHeaderRow(rows, ["uhrzeit","orario","personen","persone","startpunkt","punto di partenza"]);
-
-      const outSec  = outHdr>=0  ? extractSection(rows, outHdr,  "out")  : {error:"Header Andata non trovato." , items:[]};
-      const backSec = backHdr>=0 ? extractSection(rows, backHdr, "back") : {error:"Header Ritorno non trovato.", items:[]};
-
-      const gOut  = groupByTime(outSec.items);
-      const gBack = groupByTime(backSec.items);
-
-      render(andataEl, gOut,  outSec.error);
-      render(ritornoEl, gBack, backSec.error);
-
-      setStamp();
-      footerEl.textContent = `Origine: ${sheetName} • Auto-refresh 60s • OK`;
-      return;
-    }catch(e){
-      // prova prossimo tab
-    }
-  }
-  andataEl.innerHTML  = `<div class="empty">Impossibile leggere i dati.</div>`;
-  ritornoEl.innerHTML = `<div class="empty">Impossibile leggere i dati.</div>`;
-  footerEl.textContent = "Verifica pubblicazione del Google Sheet o le intestazioni.";
-}
-
-loadAll();
-setInterval(loadAll, REFRESH_MS);
-</script>
-</body>
-</html>
+      // Andata: header che contenga tempo + ausstieg/fermata
+      const outHdr = findHeaderR
