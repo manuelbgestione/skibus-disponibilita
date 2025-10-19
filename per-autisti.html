@@ -79,7 +79,7 @@ const REFRESH_MS = 60000;
 // vocabolario bilingue
 const H = {
   time:["Ora","Uhrzeit","Orario / Uhrzeit","Uhrzeit / Orario"],
-  people:["Persone","Personen","Persone / Personen"],
+  people:["Persone","Personen","Persone / Persone"],
   stopOut:[
     "Fermata scelta per l’andata","Fermata scelta per l'andata",
     "Gewählter Ausstiegspunkt",
@@ -98,31 +98,13 @@ const andataEl = document.getElementById("andata");
 const ritornoEl = document.getElementById("ritorno");
 document.getElementById("refreshBtn").addEventListener("click", loadAll);
 
-function nowStamp(){
-  const d = new Date();
-  return d.toLocaleString(undefined,{hour12:false});
-}
+function nowStamp(){ return new Date().toLocaleString(undefined,{hour12:false}); }
 function setStamp(){ stampEl.textContent = "Aggiornato • Aktualisiert: " + nowStamp(); }
 function gvizUrl(sheet){ return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}&t=${Date.now()}`; }
 function norm(v){ return (v==null?"":String(v)).trim(); }
 function isTimeLike(s){ return /^\d{1,2}:\d{2}$/.test(s); }
 
-/* match helpers */
-function pickIndex(headers, candidates){
-  // esatto
-  for(let i=0;i<headers.length;i++){
-    const h = norm(headers[i]).toLowerCase();
-    for(const c of candidates){ if(h === norm(c).toLowerCase()) return i; }
-  }
-  // parziale
-  for(let i=0;i<headers.length;i++){
-    const h = norm(headers[i]).toLowerCase();
-    for(const c of candidates){ if(h.includes(norm(c).toLowerCase())) return i; }
-  }
-  return -1;
-}
-
-/* ===================== CORE ===================== */
+function fetchGViz = null;
 async function fetchTable(sheetName){
   const res = await fetch(gvizUrl(sheetName),{cache:"no-store"});
   if(!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -130,55 +112,72 @@ async function fetchTable(sheetName){
   const json = JSON.parse(txt.substring(txt.indexOf("{"), txt.lastIndexOf("}")+1));
   const t = json.table;
   if(!t || !t.rows) throw new Error("Formato GViz inatteso");
-  // Materializziamo in matrice grezza
   const rows = t.rows.map(r => (r.c||[]).map(c => norm(c && (c.f ?? c.v))));
   const labels = (t.cols||[]).map(c => norm(c && c.label));
-
   return {rows, labels};
 }
 
-/* Trova la riga che contiene le intestazioni reali (scansione prime 12 righe) */
-function detectHeaderRow(rows, labels){
-  // 1) se le label GViz sono valorizzate, usiamole
-  if(labels.some(x=>x)) return { header: labels, headerRow: -1, fromRow: 0, useLabels: true };
-
-  // 2) cerca tra le prime 12 righe una che contenga almeno 2 dei campi attesi
-  const CAND = [...H.time, ...H.people, ...H.stopOut, ...H.stopBack].map(s=>s.toLowerCase());
-  const maxScan = Math.min(rows.length, 12);
-  for(let r=0;r<maxScan;r++){
-    const line = rows[r].map(x=>x.toLowerCase());
-    let hits = 0;
-    for(const cell of line){ if(CAND.some(c => cell.includes(c))) hits++; }
-    if(hits >= 2){
-      return { header: rows[r], headerRow: r, fromRow: r+1, useLabels: false };
-    }
+/* funzioni matching */
+function idxExactOrPartial(headers, candidates){
+  for(let i=0;i<headers.length;i++){
+    const h = norm(headers[i]).toLowerCase();
+    for(const c of candidates){ if(h === norm(c).toLowerCase()) return i; }
   }
-  // fallback: nessuna intestazione trovata
-  return { header: [], headerRow: -1, fromRow: 0, useLabels: false };
+  for(let i=0;i<headers.length;i++){
+    const h = norm(headers[i]).toLowerCase();
+    for(const c of candidates){ if(h.includes(norm(c).toLowerCase())) return i; }
+  }
+  return -1;
 }
 
-function buildGroups(matrix, header, mode){
-  // mode: "out" (andata) / "back" (ritorno)
-  const iTime   = pickIndex(header, H.time);
-  const iPeople = pickIndex(header, H.people);
-  const iStop   = pickIndex(header, mode==="out" ? H.stopOut : H.stopBack);
-
-  if(iTime<0 || iStop<0 || iPeople<0){
-    throw new Error(`Intestazioni mancanti (${mode}). Header: ${JSON.stringify(header)}`);
+/* === Scopre le due sezioni separate nel foglio: Andata e Ritorno === */
+function findSectionHeaderRow(rows, candidates){
+  // cerca entro le prime 20 righe una riga che contenga almeno due candidati
+  const C = candidates.map(s=>s.toLowerCase());
+  const maxScan = Math.min(rows.length, 20);
+  for(let r=0;r<maxScan;r++){
+    const line = rows[r].map(x=>x.toLowerCase());
+    const hits = line.filter(cell => C.some(c => cell.includes(c))).length;
+    if(hits >= 2) return r;
   }
+  return -1;
+}
 
-  const map = new Map(); // key time|stop -> somma persone
-  for(const row of matrix){
+function extractSection(rows, headerRow, dict){
+  if(headerRow < 0) return {items:[]};
+  const header = rows[headerRow];
+  const iTime   = idxExactOrPartial(header, H.time);
+  const iPeople = idxExactOrPartial(header, H.people);
+  const iStop   = idxExactOrPartial(header, dict); // stopOut o stopBack
+
+  if(iTime<0 || iPeople<0 || iStop<0) return {items:[]};
+
+  const items = [];
+  for(let r=headerRow+1; r<rows.length; r++){
+    const row = rows[r];
+    const allEmpty = row.every(x=>!norm(x));
+    // fine se riga vuota OPPURE se ricomincia un’altra intestazione riconoscibile
+    const looksLikeNewHeader =
+      row.some(x=>H.time.concat(H.people, H.stopOut, H.stopBack)
+        .some(c => norm(x).toLowerCase() === norm(c).toLowerCase()));
+    if(allEmpty || looksLikeNewHeader) break;
+
     const time = norm(row[iTime]);
     const stop = norm(row[iStop]);
-    let people = norm(row[iPeople]).replace(",",".");
-    people = Number(people) || 0;
-
+    let ppl = norm(row[iPeople]).replace(",", ".");
+    const people = Number(ppl) || 0;
     if(!isTimeLike(time) || !stop || people<=0) continue;
-    const key = `${time}|${stop}`;
-    map.set(key, (map.get(key)||0) + people);
+    items.push({time, stop, people});
   }
+  return {items};
+}
 
+function groupByTime(items){
+  const map = new Map();
+  for(const it of items){
+    const key = it.time + "|" + it.stop;
+    map.set(key, (map.get(key)||0) + it.people);
+  }
   const byTime = {};
   for(const [key,val] of map){
     const [t,s] = key.split("|");
@@ -192,14 +191,14 @@ function buildGroups(matrix, header, mode){
   return {times, byTime};
 }
 
-function renderSection(container, groups){
+function render(container, grouped){
   container.innerHTML = "";
-  if(groups.times.length===0){
+  if(grouped.times.length===0){
     container.innerHTML = `<div class="empty">Nessun dato disponibile / Keine Daten verfügbar.</div>`;
     return;
   }
-  for(const t of groups.times){
-    const rows = groups.byTime[t].sort((a,b)=> a.stop.localeCompare(b.stop, undefined, {sensitivity:"base"}));
+  for(const t of grouped.times){
+    const rows = grouped.byTime[t].sort((a,b)=> a.stop.localeCompare(b.stop, undefined, {sensitivity:"base"}));
     const tot = rows.reduce((s,x)=>s+x.people,0);
     const wrap = document.createElement("div");
     wrap.className = "slot";
@@ -225,26 +224,27 @@ function renderSection(container, groups){
 
 async function loadAll(){
   footerEl.textContent = "Aggiornamento in corso… / Wird aktualisiert…";
-  let data = null, used = null;
-  for(const name of CANDIDATE_SHEETS){
+  for(const sheetName of CANDIDATE_SHEETS){
     try{
-      const {rows, labels} = await fetchTable(name);
-      const headInfo = detectHeaderRow(rows, labels);
-      // materializza matrice dati a partire da fromRow
-      const matrix = rows.slice(headInfo.fromRow);
-      const header = headInfo.useLabels ? labels : headInfo.header;
+      const {rows, labels} = await fetchTable(sheetName);
+      // Trova header Andata e header Ritorno indipendenti
+      const outHeaderRow  = findSectionHeaderRow(rows, H.time.concat(H.people, H.stopOut));
+      const backHeaderRow = findSectionHeaderRow(rows, H.time.concat(H.people, H.stopBack));
 
-      const gOut  = buildGroups(matrix, header, "out");
-      const gBack = buildGroups(matrix, header, "back");
+      const outSec  = extractSection(rows, outHeaderRow, H.stopOut);
+      const backSec = extractSection(rows, backHeaderRow, H.stopBack);
 
-      renderSection(andataEl, gOut);
-      renderSection(ritornoEl, gBack);
-      used = name;
+      const gOut  = groupByTime(outSec.items);
+      const gBack = groupByTime(backSec.items);
+
+      render(andataEl, gOut);
+      render(ritornoEl, gBack);
+
       setStamp();
-      footerEl.textContent = `Origine: ${used} • Auto-refresh 60s • OK`;
+      footerEl.textContent = `Origine: ${sheetName} • Auto-refresh 60s • OK`;
       return;
     }catch(e){
-      // prova il prossimo
+      // prova prossimo
     }
   }
   andataEl.innerHTML  = `<div class="empty">Impossibile leggere i dati.</div>`;
