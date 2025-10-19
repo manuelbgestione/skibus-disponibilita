@@ -51,7 +51,16 @@
   };
 
   const gviz = s => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(s)}`;
-  const parseGViz = t => JSON.parse(t.match(/google.visualization.Query.setResponse\\((.*)\\);/s)[1]);
+  const parseGViz = (t) => {
+  const s = t.trim();
+  // Caso 1: Google restituisce JS con setResponse(...)
+  const m = s.match(/google\.visualization\.Query\.setResponse\((.*)\);?/s);
+  if (m && m[1]) return JSON.parse(m[1]);
+  // Caso 2: Google restituisce JSON puro (scaricato dal browser)
+  if (s.startsWith("{")) return JSON.parse(s);
+  throw new Error("Formato GViz non riconosciuto");
+};
+
   async function fetchSheet(name){
     const res = await fetch(gviz(name), {cache:"no-store"});
     const txt = await res.text();
