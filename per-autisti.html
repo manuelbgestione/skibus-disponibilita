@@ -37,6 +37,7 @@
     .cell:last-child{border-top-right-radius:10px;border-bottom-right-radius:10px;text-align:right;font-weight:800}
     .empty{padding:14px;border:1px dashed var(--line);border-radius:12px;background:#fafafa;color:var(--sub);text-align:center;margin-top:12px}
     .btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:8px 10px;font-weight:600;cursor:pointer}
+    .err{font-size:12px;color:#b91c1c;margin-top:6px}
   </style>
 </head>
 <body>
@@ -76,100 +77,40 @@ const CANDIDATE_SHEETS = [
 ];
 const REFRESH_MS = 60000;
 
-// vocabolario bilingue
-const H = {
-  time:["Ora","Uhrzeit","Orario / Uhrzeit","Uhrzeit / Orario"],
-  people:["Persone","Personen","Persone / Persone"],
-  stopOut:[
-    "Fermata scelta per l’andata","Fermata scelta per l'andata",
-    "Gewählter Ausstiegspunkt",
-    "Fermata scelta per l’andata / Gewählter Ausstiegspunkt"
-  ],
-  stopBack:[
-    "Punto di partenza scelto","Gewählter Startpunkt",
-    "Punto di partenza scelto / Gewählter Startpunkt"
-  ]
-};
-
-/* ===================== UTILS ===================== */
+/* ===================== DOM ===================== */
 const stampEl = document.getElementById("stamp");
 const footerEl = document.getElementById("footerNote");
 const andataEl = document.getElementById("andata");
 const ritornoEl = document.getElementById("ritorno");
 document.getElementById("refreshBtn").addEventListener("click", loadAll);
 
+/* ===================== UTILS ===================== */
 function nowStamp(){ return new Date().toLocaleString(undefined,{hour12:false}); }
 function setStamp(){ stampEl.textContent = "Aggiornato • Aktualisiert: " + nowStamp(); }
 function gvizUrl(sheet){ return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}&t=${Date.now()}`; }
 function norm(v){ return (v==null?"":String(v)).trim(); }
-function isTimeLike(s){ return /^\d{1,2}:\d{2}$/.test(s); }
+function isTimeLike(s){ return /^\d{1,2}:\d{2}$/.test(s||""); }
 
-function fetchGViz = null;
-async function fetchTable(sheetName){
-  const res = await fetch(gvizUrl(sheetName),{cache:"no-store"});
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  const txt = await res.text();
-  const json = JSON.parse(txt.substring(txt.indexOf("{"), txt.lastIndexOf("}")+1));
-  const t = json.table;
-  if(!t || !t.rows) throw new Error("Formato GViz inatteso");
-  const rows = t.rows.map(r => (r.c||[]).map(c => norm(c && (c.f ?? c.v))));
-  const labels = (t.cols||[]).map(c => norm(c && c.label));
-  return {rows, labels};
+/* ——— Matching “lessicale” indipendente dall’ordine lingua ———
+   time:     include "uhrzeit" oppure "orario"
+   people:   include "personen" oppure "persone"
+   stopOut:  include "ausstieg" (o "ausstiegspunkt") oppure "fermata"
+   stopBack: include "startpunkt" oppure "punto di partenza"
+*/
+function matchIndex(headers, keywords){
+  const hk = headers.map(h => norm(h).toLowerCase());
+  return hk.findIndex(h => keywords.some(k => h.includes(k)));
 }
 
-/* funzioni matching */
-function idxExactOrPartial(headers, candidates){
-  for(let i=0;i<headers.length;i++){
-    const h = norm(headers[i]).toLowerCase();
-    for(const c of candidates){ if(h === norm(c).toLowerCase()) return i; }
-  }
-  for(let i=0;i<headers.length;i++){
-    const h = norm(headers[i]).toLowerCase();
-    for(const c of candidates){ if(h.includes(norm(c).toLowerCase())) return i; }
-  }
-  return -1;
-}
-
-/* === Scopre le due sezioni separate nel foglio: Andata e Ritorno === */
-function findSectionHeaderRow(rows, candidates){
-  // cerca entro le prime 20 righe una riga che contenga almeno due candidati
-  const C = candidates.map(s=>s.toLowerCase());
-  const maxScan = Math.min(rows.length, 20);
-  for(let r=0;r<maxScan;r++){
-    const line = rows[r].map(x=>x.toLowerCase());
-    const hits = line.filter(cell => C.some(c => cell.includes(c))).length;
+function findHeaderRow(rows, keywordsUnion, maxScan=24){
+  const kw = keywordsUnion.map(x=>x.toLowerCase());
+  const lim = Math.min(rows.length, maxScan);
+  for(let r=0;r<lim;r++){
+    const line = rows[r].map(x=>norm(x).toLowerCase());
+    const hits = line.filter(cell => kw.some(k => cell.includes(k))).length;
     if(hits >= 2) return r;
   }
   return -1;
-}
-
-function extractSection(rows, headerRow, dict){
-  if(headerRow < 0) return {items:[]};
-  const header = rows[headerRow];
-  const iTime   = idxExactOrPartial(header, H.time);
-  const iPeople = idxExactOrPartial(header, H.people);
-  const iStop   = idxExactOrPartial(header, dict); // stopOut o stopBack
-
-  if(iTime<0 || iPeople<0 || iStop<0) return {items:[]};
-
-  const items = [];
-  for(let r=headerRow+1; r<rows.length; r++){
-    const row = rows[r];
-    const allEmpty = row.every(x=>!norm(x));
-    // fine se riga vuota OPPURE se ricomincia un’altra intestazione riconoscibile
-    const looksLikeNewHeader =
-      row.some(x=>H.time.concat(H.people, H.stopOut, H.stopBack)
-        .some(c => norm(x).toLowerCase() === norm(c).toLowerCase()));
-    if(allEmpty || looksLikeNewHeader) break;
-
-    const time = norm(row[iTime]);
-    const stop = norm(row[iStop]);
-    let ppl = norm(row[iPeople]).replace(",", ".");
-    const people = Number(ppl) || 0;
-    if(!isTimeLike(time) || !stop || people<=0) continue;
-    items.push({time, stop, people});
-  }
-  return {items};
 }
 
 function groupByTime(items){
@@ -191,14 +132,18 @@ function groupByTime(items){
   return {times, byTime};
 }
 
-function render(container, grouped){
+function render(container, groups, errMsg){
   container.innerHTML = "";
-  if(grouped.times.length===0){
+  if(errMsg){
+    container.innerHTML = `<div class="empty">Impossibile leggere i dati.</div><div class="err">${errMsg}</div>`;
+    return;
+  }
+  if(groups.times.length===0){
     container.innerHTML = `<div class="empty">Nessun dato disponibile / Keine Daten verfügbar.</div>`;
     return;
   }
-  for(const t of grouped.times){
-    const rows = grouped.byTime[t].sort((a,b)=> a.stop.localeCompare(b.stop, undefined, {sensitivity:"base"}));
+  for(const t of groups.times){
+    const rows = groups.byTime[t].sort((a,b)=> a.stop.localeCompare(b.stop, undefined, {sensitivity:"base"}));
     const tot = rows.reduce((s,x)=>s+x.people,0);
     const wrap = document.createElement("div");
     wrap.className = "slot";
@@ -222,29 +167,80 @@ function render(container, grouped){
   }
 }
 
+/* ===================== CORE ===================== */
+async function fetchTable(sheetName){
+  const res = await fetch(gvizUrl(sheetName),{cache:"no-store"});
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const txt = await res.text();
+  const json = JSON.parse(txt.substring(txt.indexOf("{"), txt.lastIndexOf("}")+1));
+  const t = json.table;
+  if(!t || !t.rows) throw new Error("Formato GViz inatteso");
+  const rows = t.rows.map(r => (r.c||[]).map(c => norm(c && (c.f ?? c.v))));
+  const labels = (t.cols||[]).map(c => norm(c && c.label));
+  return {rows, labels};
+}
+
+function extractSection(rows, headerRow, role){ // role: "out" | "back"
+  const header = rows[headerRow];
+  const timeIdx   = matchIndex(header, ["uhrzeit","orario"]);
+  const peopleIdx = matchIndex(header, ["personen","persone"]);
+  const stopIdx   = role==="out"
+    ? matchIndex(header, ["ausstieg","ausstiegspunkt","fermata"])
+    : matchIndex(header, ["startpunkt","punto di partenza"]);
+
+  if(timeIdx<0 || peopleIdx<0 || stopIdx<0){
+    const missing = [
+      timeIdx<0?"[Uhrzeit/Orario]":"",
+      peopleIdx<0?"[Personen/Persone]":"",
+      stopIdx<0?(role==="out"?"[Ausstieg/Fermata]":"[Startpunkt/Punto di partenza]"):""
+    ].filter(Boolean).join(" ");
+    return {error:`Intestazioni mancanti ${missing}.`, items:[]};
+  }
+
+  const items = [];
+  for(let r=headerRow+1; r<rows.length; r++){
+    const row = rows[r];
+    const allEmpty = row.every(x=>!norm(x));
+    // interrompi alla riga vuota o a un’altra intestazione plausibile
+    const looksLikeNewHeader = row.some(x=>{
+      const s = norm(x).toLowerCase();
+      return ["uhrzeit","orario","personen","persone","ausstieg","startpunkt","fermata","punto di partenza"].some(k=>s.includes(k));
+    });
+    if(allEmpty || looksLikeNewHeader) break;
+
+    const time = norm(row[timeIdx]);
+    const stop = norm(row[stopIdx]);
+    const ppl  = Number(norm(row[peopleIdx]).replace(",",".")) || 0;
+    if(!isTimeLike(time) || !stop || ppl<=0) continue;
+    items.push({time, stop, people:ppl});
+  }
+  return {items};
+}
+
 async function loadAll(){
   footerEl.textContent = "Aggiornamento in corso… / Wird aktualisiert…";
   for(const sheetName of CANDIDATE_SHEETS){
     try{
       const {rows, labels} = await fetchTable(sheetName);
-      // Trova header Andata e header Ritorno indipendenti
-      const outHeaderRow  = findSectionHeaderRow(rows, H.time.concat(H.people, H.stopOut));
-      const backHeaderRow = findSectionHeaderRow(rows, H.time.concat(H.people, H.stopBack));
 
-      const outSec  = extractSection(rows, outHeaderRow, H.stopOut);
-      const backSec = extractSection(rows, backHeaderRow, H.stopBack);
+      // trova header Andata e header Ritorno (scansione prime 24 righe)
+      const outHdr = findHeaderRow(rows, ["uhrzeit","orario","personen","persone","ausstieg","ausstiegspunkt","fermata"]);
+      const backHdr= findHeaderRow(rows, ["uhrzeit","orario","personen","persone","startpunkt","punto di partenza"]);
+
+      const outSec  = outHdr>=0  ? extractSection(rows, outHdr,  "out")  : {error:"Header Andata non trovato." , items:[]};
+      const backSec = backHdr>=0 ? extractSection(rows, backHdr, "back") : {error:"Header Ritorno non trovato.", items:[]};
 
       const gOut  = groupByTime(outSec.items);
       const gBack = groupByTime(backSec.items);
 
-      render(andataEl, gOut);
-      render(ritornoEl, gBack);
+      render(andataEl, gOut,  outSec.error);
+      render(ritornoEl, gBack, backSec.error);
 
       setStamp();
       footerEl.textContent = `Origine: ${sheetName} • Auto-refresh 60s • OK`;
       return;
     }catch(e){
-      // prova prossimo
+      // prova prossimo tab
     }
   }
   andataEl.innerHTML  = `<div class="empty">Impossibile leggere i dati.</div>`;
