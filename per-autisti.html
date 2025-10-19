@@ -6,13 +6,13 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>Riepilogo Fermate Autisti • Skibus</title>
+  <title>Per Autisti • Riepilogo Fermate / Zusammenfassung der Haltestellen</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg1:#e6f5ff; --bg2:#e9f8f2; --card:#ffffff; --ink:#0f172a; --sub:#475569; --ok:#16a34a; --chip:#eaf7ef; --line:#e6eaf0;
+      --bg1:#e6f1ff; --bg2:#e9f8f2; --card:#ffffff; --ink:#0f172a; --sub:#475569; --ok:#16a34a; --chip:#eaf7ef; --line:#e6eaf0;
       --radius:18px; --shadow: 0 8px 24px rgba(0,0,0,.08);
     }
     html,body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(135deg,var(--bg1),var(--bg2)) fixed;color:var(--ink)}
@@ -26,23 +26,17 @@
     .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 16px 10px}
     .card h2{margin:0 0 6px 0;font-size:18px}
     .sub{margin:0;color:var(--sub);font-size:13px}
-    .row{display:flex;gap:12px;margin-top:12px}
-    .col{flex:1}
-    .slot{background:#f7fafc;border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin-bottom:10px}
-    .slot h3{margin:0 0 4px 0;font-size:15px}
-    .slot .k{font-size:12px;color:var(--sub)}
-    .slot .v{font-weight:700}
+    .slot{background:#f7fafc;border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin-top:12px}
+    .slot h3{margin:0 0 6px 0;font-size:15px}
     .badge{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#eef2ff;color:#4338ca;font-weight:700;font-size:12px}
-    .footer{margin-top:16px;font-size:12px;color:var(--sub)}
-    .lang{display:flex;gap:8px;align-items:center}
-    .btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:8px 10px;font-weight:600;cursor:pointer}
-    .table{width:100%;border-collapse:separate;border-spacing:0 8px;margin-top:8px}
+    .table{width:100%;border-collapse:separate;border-spacing:0 8px;margin-top:4px}
     .th{font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.4px}
     .rowline{background:#fff;border:1px solid var(--line);box-shadow:0 2px 8px rgba(0,0,0,.04)}
     .cell{padding:10px 12px}
     .cell:first-child{border-top-left-radius:10px;border-bottom-left-radius:10px}
     .cell:last-child{border-top-right-radius:10px;border-bottom-right-radius:10px;text-align:right;font-weight:800}
-    .empty{padding:14px;border:1px dashed var(--line);border-radius:12px;background:#fafafa;color:var(--sub);text-align:center}
+    .empty{padding:14px;border:1px dashed var(--line);border-radius:12px;background:#fafafa;color:var(--sub);text-align:center;margin-top:12px}
+    .btn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:8px 10px;font-weight:600;cursor:pointer}
   </style>
 </head>
 <body>
@@ -52,7 +46,7 @@
         <div class="title">Per Autisti • Riepilogo Fermate / Zusammenfassung der Haltestellen</div>
         <div class="muted" id="subtitle">Dati in tempo quasi reale dal Google Sheet. Aggiornamento automatico ogni 60 secondi.</div>
       </div>
-      <div class="lang">
+      <div>
         <button class="btn" id="refreshBtn" title="Aggiorna / Aktualisieren">⟳ Aggiorna</button>
         <span class="pill" id="stamp">—</span>
       </div>
@@ -61,50 +55,43 @@
     <div class="grid">
       <div class="card">
         <h2>Andata / Hinfahrt</h2>
-        <p class="sub">Raggruppato per Orario e Fermata scelta per l’andata / Uhrzeit und gewählter Ausstiegspunkt.</p>
+        <p class="sub">Orario + Fermata scelta per l’andata / Uhrzeit + gewählter Ausstiegspunkt.</p>
         <div id="andata"></div>
       </div>
       <div class="card">
         <h2>Ritorno / Rückfahrt</h2>
-        <p class="sub">Raggruppato per Orario e Punto di partenza scelto / Uhrzeit und gewählter Startpunkt.</p>
+        <p class="sub">Orario + Punto di partenza scelto / Uhrzeit + gewählter Startpunkt.</p>
         <div id="ritorno"></div>
       </div>
     </div>
 
-    <div class="footer" id="footerNote">Pronto.</div>
+    <div class="muted" style="margin-top:16px" id="footerNote">Pronto.</div>
   </div>
 
 <script>
 /* ===================== CONFIG ===================== */
 const SHEET_ID = "1swHUZ3IyV9dw1Y9EqzuChMGOP7lOwOrIIPX190wOnAc";
-// Proveremo questi fogli in ordine finché uno risponde:
 const CANDIDATE_SHEETS = [
-  "Heute / Oggi", "Morgen / Domani", "Skibus Prenotazioni",
-  "Riepilogo Fermate Autisti", "Andata", "Ritorno"
+  "Heute / Oggi","Morgen / Domani","Riepilogo Fermate Autisti","Skibus Prenotazioni","Andata","Ritorno"
 ];
-// Mappa intestazioni bilingue
-const H = {
-  time: [
-    "Ora", "Uhrzeit", "Orario / Uhrzeit", "Uhrzeit / Orario"
-  ],
-  people: [
-    "Persone", "Personen", "Persone / Personen"
-  ],
-  stopOut: [
-    "Fermata scelta per l’andata", "Fermata scelta per l'andata",
-    "Gewählter Ausstiegspunkt", "Fermata scelta per l’andata / Gewählter Ausstiegspunkt",
-    "Gewaehlter Ausstiegspunkt" // fallback
-  ],
-  stopBack: [
-    "Punto di partenza scelto", "Gewählter Startpunkt",
-    "Punto di partenza scelto / Gewählter Startpunkt",
-    "Gewaehlter Startpunkt" // fallback
-  ]
-};
-// refresh ogni 60 s
 const REFRESH_MS = 60000;
 
-/* ===================== CORE ===================== */
+// vocabolario bilingue
+const H = {
+  time:["Ora","Uhrzeit","Orario / Uhrzeit","Uhrzeit / Orario"],
+  people:["Persone","Personen","Persone / Personen"],
+  stopOut:[
+    "Fermata scelta per l’andata","Fermata scelta per l'andata",
+    "Gewählter Ausstiegspunkt",
+    "Fermata scelta per l’andata / Gewählter Ausstiegspunkt"
+  ],
+  stopBack:[
+    "Punto di partenza scelto","Gewählter Startpunkt",
+    "Punto di partenza scelto / Gewählter Startpunkt"
+  ]
+};
+
+/* ===================== UTILS ===================== */
 const stampEl = document.getElementById("stamp");
 const footerEl = document.getElementById("footerNote");
 const andataEl = document.getElementById("andata");
@@ -115,79 +102,94 @@ function nowStamp(){
   const d = new Date();
   return d.toLocaleString(undefined,{hour12:false});
 }
-function setStamp() { stampEl.textContent = "Aggiornato • Aktualisiert: " + nowStamp(); }
+function setStamp(){ stampEl.textContent = "Aggiornato • Aktualisiert: " + nowStamp(); }
+function gvizUrl(sheet){ return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheet)}&t=${Date.now()}`; }
+function norm(v){ return (v==null?"":String(v)).trim(); }
+function isTimeLike(s){ return /^\d{1,2}:\d{2}$/.test(s); }
 
-function gvizUrl(sheetName){
-  const t = Date.now(); // anti-cache
-  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&t=${t}`;
-}
-
-async function tryFetch(sheetName){
-  const url = gvizUrl(sheetName);
-  const res = await fetch(url, { cache: "no-store" });
-  if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  const txt = await res.text();
-  // risposta GViz: "google.visualization.Query.setResponse(...);"
-  const json = JSON.parse(txt.substring(txt.indexOf("{"), txt.lastIndexOf("}")+1));
-  if(!json.table || !json.table.rows) throw new Error("Formato GViz inatteso");
-  return json.table;
-}
-
-function pickColIndex(headers, candidates){
+/* match helpers */
+function pickIndex(headers, candidates){
+  // esatto
   for(let i=0;i<headers.length;i++){
-    const h = String(headers[i]||"").trim();
-    for(const c of candidates){
-      if(h.toLowerCase() === String(c).toLowerCase()) return i;
-    }
+    const h = norm(headers[i]).toLowerCase();
+    for(const c of candidates){ if(h === norm(c).toLowerCase()) return i; }
   }
-  // match parziale
+  // parziale
   for(let i=0;i<headers.length;i++){
-    const h = String(headers[i]||"").toLowerCase();
-    for(const c of candidates){
-      const cc = String(c).toLowerCase();
-      if(h.includes(cc)) return i;
-    }
+    const h = norm(headers[i]).toLowerCase();
+    for(const c of candidates){ if(h.includes(norm(c).toLowerCase())) return i; }
   }
   return -1;
 }
 
-function normalizeCell(c){ return c && c.v != null ? String(c.v).trim() : ""; }
+/* ===================== CORE ===================== */
+async function fetchTable(sheetName){
+  const res = await fetch(gvizUrl(sheetName),{cache:"no-store"});
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  const txt = await res.text();
+  const json = JSON.parse(txt.substring(txt.indexOf("{"), txt.lastIndexOf("}")+1));
+  const t = json.table;
+  if(!t || !t.rows) throw new Error("Formato GViz inatteso");
+  // Materializziamo in matrice grezza
+  const rows = t.rows.map(r => (r.c||[]).map(c => norm(c && (c.f ?? c.v))));
+  const labels = (t.cols||[]).map(c => norm(c && c.label));
 
-function buildGroups(table, mode){
-  // mode: "out" = Andata (stopOut) • "back" = Ritorno (stopBack)
-  const headers = (table.cols||[]).map(c => (c && c.label) ? c.label : "");
-  const iTime   = pickColIndex(headers, H.time);
-  const iPeople = pickColIndex(headers, H.people);
-  const iStop   = pickColIndex(headers, mode==="out" ? H.stopOut : H.stopBack);
+  return {rows, labels};
+}
+
+/* Trova la riga che contiene le intestazioni reali (scansione prime 12 righe) */
+function detectHeaderRow(rows, labels){
+  // 1) se le label GViz sono valorizzate, usiamole
+  if(labels.some(x=>x)) return { header: labels, headerRow: -1, fromRow: 0, useLabels: true };
+
+  // 2) cerca tra le prime 12 righe una che contenga almeno 2 dei campi attesi
+  const CAND = [...H.time, ...H.people, ...H.stopOut, ...H.stopBack].map(s=>s.toLowerCase());
+  const maxScan = Math.min(rows.length, 12);
+  for(let r=0;r<maxScan;r++){
+    const line = rows[r].map(x=>x.toLowerCase());
+    let hits = 0;
+    for(const cell of line){ if(CAND.some(c => cell.includes(c))) hits++; }
+    if(hits >= 2){
+      return { header: rows[r], headerRow: r, fromRow: r+1, useLabels: false };
+    }
+  }
+  // fallback: nessuna intestazione trovata
+  return { header: [], headerRow: -1, fromRow: 0, useLabels: false };
+}
+
+function buildGroups(matrix, header, mode){
+  // mode: "out" (andata) / "back" (ritorno)
+  const iTime   = pickIndex(header, H.time);
+  const iPeople = pickIndex(header, H.people);
+  const iStop   = pickIndex(header, mode==="out" ? H.stopOut : H.stopBack);
 
   if(iTime<0 || iStop<0 || iPeople<0){
-    throw new Error(`Intestazioni non trovate (${mode}). Trovati: ${JSON.stringify(headers)}`);
+    throw new Error(`Intestazioni mancanti (${mode}). Header: ${JSON.stringify(header)}`);
   }
-  const map = new Map(); // key: time|stop => count
-  for(const r of table.rows){
-    const cells = r.c || [];
-    const time = normalizeCell(cells[iTime]);
-    const stop = normalizeCell(cells[iStop]);
-    const peopleRaw = normalizeCell(cells[iPeople]);
-    const people = Number(peopleRaw.replace(",", ".")) || 0;
-    if(!time || !stop || !people) continue;
+
+  const map = new Map(); // key time|stop -> somma persone
+  for(const row of matrix){
+    const time = norm(row[iTime]);
+    const stop = norm(row[iStop]);
+    let people = norm(row[iPeople]).replace(",",".");
+    people = Number(people) || 0;
+
+    if(!isTimeLike(time) || !stop || people<=0) continue;
     const key = `${time}|${stop}`;
     map.set(key, (map.get(key)||0) + people);
   }
-  // convert to object grouped by time -> [{stop, people}]
+
   const byTime = {};
-  for(const [key, val] of map){
-    const [t, s] = key.split("|");
-    if(!byTime[t]) byTime[t] = [];
-    byTime[t].push({stop:s, people:val});
+  for(const [key,val] of map){
+    const [t,s] = key.split("|");
+    (byTime[t] ||= []).push({stop:s, people:val});
   }
-  // sort times numericamente (hh:mm)
   const times = Object.keys(byTime).sort((a,b)=>{
     const [ah,am]=a.split(":").map(Number);
     const [bh,bm]=b.split(":").map(Number);
     return (ah*60+am)-(bh*60+bm);
   });
-  return { times, byTime };
+  return {times, byTime};
 }
 
 function renderSection(container, groups){
@@ -198,29 +200,23 @@ function renderSection(container, groups){
   }
   for(const t of groups.times){
     const rows = groups.byTime[t].sort((a,b)=> a.stop.localeCompare(b.stop, undefined, {sensitivity:"base"}));
-    const total = rows.reduce((s,x)=>s+x.people,0);
+    const tot = rows.reduce((s,x)=>s+x.people,0);
     const wrap = document.createElement("div");
     wrap.className = "slot";
     wrap.innerHTML = `
-      <h3>${t} <span class="badge">${total} Personen / Persone</span></h3>
+      <h3>${t} <span class="badge">${tot} Personen / Persone</span></h3>
       <table class="table">
-        <thead>
-          <tr class="th">
-            <th class="cell" style="text-align:left">Haltestelle / Fermata</th>
-            <th class="cell">Personen / Persone</th>
-          </tr>
-        </thead>
+        <thead><tr class="th">
+          <th class="cell" style="text-align:left">Haltestelle / Fermata</th>
+          <th class="cell">Personen / Persone</th>
+        </tr></thead>
         <tbody></tbody>
-      </table>
-    `;
+      </table>`;
     const tbody = wrap.querySelector("tbody");
     for(const r of rows){
       const tr = document.createElement("tr");
       tr.className = "rowline";
-      tr.innerHTML = `
-        <td class="cell">${r.stop}</td>
-        <td class="cell">${r.people}</td>
-      `;
+      tr.innerHTML = `<td class="cell">${r.stop}</td><td class="cell">${r.people}</td>`;
       tbody.appendChild(tr);
     }
     container.appendChild(wrap);
@@ -229,20 +225,35 @@ function renderSection(container, groups){
 
 async function loadAll(){
   footerEl.textContent = "Aggiornamento in corso… / Wird aktualisiert…";
-  let table = null, usedSheet = null;
+  let data = null, used = null;
   for(const name of CANDIDATE_SHEETS){
     try{
-      table = await tryFetch(name);
-      usedSheet = name;
-      break;
+      const {rows, labels} = await fetchTable(name);
+      const headInfo = detectHeaderRow(rows, labels);
+      // materializza matrice dati a partire da fromRow
+      const matrix = rows.slice(headInfo.fromRow);
+      const header = headInfo.useLabels ? labels : headInfo.header;
+
+      const gOut  = buildGroups(matrix, header, "out");
+      const gBack = buildGroups(matrix, header, "back");
+
+      renderSection(andataEl, gOut);
+      renderSection(ritornoEl, gBack);
+      used = name;
+      setStamp();
+      footerEl.textContent = `Origine: ${used} • Auto-refresh 60s • OK`;
+      return;
     }catch(e){
-      // prova prossimo
+      // prova il prossimo
     }
   }
-  if(!table){
-    footerEl.textContent = "Impossibile leggere il Google Sheet. Verifica la pubblicazione o i permessi.";
-    return;
-  }
-  try{
-    const gOut  = buildGroups(table, "out");
-    const gBack = buildGroups(table, "b
+  andataEl.innerHTML  = `<div class="empty">Impossibile leggere i dati.</div>`;
+  ritornoEl.innerHTML = `<div class="empty">Impossibile leggere i dati.</div>`;
+  footerEl.textContent = "Verifica pubblicazione del Google Sheet o le intestazioni.";
+}
+
+loadAll();
+setInterval(loadAll, REFRESH_MS);
+</script>
+</body>
+</html>
